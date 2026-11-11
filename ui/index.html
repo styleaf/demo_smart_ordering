@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>兰庭玉树太仓餐厅</title>
+  <style>
+    :root {
+      --ink: #1c1915;
+      --paper: #f6f1e7;
+      --panel: #fffaf3;
+      --line: #e4d8c8;
+      --cinnabar: #9c3b2e;
+      --pine: #2f4a3c;
+      --muted: #6f655b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 500px at 10% -10%, #efe2cf 0%, transparent 55%),
+        var(--paper);
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: end;
+      padding: 28px 32px 12px;
+    }
+    h1 {
+      margin: 0;
+      font-family: "Palatino Linotype", "Songti SC", serif;
+      font-size: 32px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    header p { margin: 6px 0 0; color: var(--muted); }
+    main {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 20px;
+      padding: 12px 32px 32px;
+      height: calc(100vh - 108px);
+    }
+    .menu, .chat {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      min-height: 0;
+    }
+    .menu { padding: 18px; overflow: auto; }
+    .menu h2, .chat h2 { margin: 0 0 12px; font-size: 16px; }
+    .dish {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .dish b { font-weight: 600; }
+    .price { color: var(--cinnabar); white-space: nowrap; }
+    .chat {
+      display: flex;
+      flex-direction: column;
+      padding: 18px;
+    }
+    #log {
+      flex: 1;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-right: 4px;
+    }
+    .bubble {
+      max-width: 78%;
+      padding: 12px 14px;
+      border-radius: 14px;
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }
+    .user {
+      align-self: flex-end;
+      background: var(--pine);
+      color: #f7f3ea;
+    }
+    .bot {
+      align-self: flex-start;
+      background: #f3ebe1;
+    }
+    form { display: flex; gap: 10px; margin-top: 12px; }
+    input {
+      flex: 1;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font: inherit;
+      background: #fff;
+    }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 0 18px;
+      background: var(--cinnabar);
+      color: white;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: default; }
+    #suggest {
+      display: none;
+      margin-top: 8px;
+      text-align: left;
+      background: transparent;
+      color: var(--pine);
+      border: 1px dashed var(--pine);
+      padding: 8px 12px;
+    }
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; height: auto; }
+      .menu { max-height: 220px; }
+      .chat { height: 70vh; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>兰庭玉树太仓餐厅</h1>
+      <p>北京市东城区东四十二条 3 号 · 010-87621252</p>
+    </div>
+  </header>
+  <main>
+    <section class="menu">
+      <h2>菜单</h2>
+      <div id="menu">正在读取菜单…</div>
+    </section>
+    <section class="chat">
+      <h2>点餐助手</h2>
+      <div id="log"></div>
+      <button id="suggest" type="button"></button>
+      <form id="composer">
+        <input id="text" autocomplete="off" placeholder="问问营业时间、想吃什么，或订位" />
+        <button id="send" type="submit">发送</button>
+      </form>
+    </section>
+  </main>
+  <script>
+    const log = document.querySelector("#log");
+    const text = document.querySelector("#text");
+    const suggest = document.querySelector("#suggest");
+    const send = document.querySelector("#send");
+    let threadId = sessionStorage.getItem("thread_id");
+    if (!threadId) {
+      threadId = crypto.randomUUID();
+      sessionStorage.setItem("thread_id", threadId);
+    }
+    let suggestTimer = 0;
+    let suggestion = null;
+
+    function addBubble(role, content) {
+      const node = document.createElement("div");
+      node.className = "bubble " + role;
+      node.textContent = content;
+      log.appendChild(node);
+      log.scrollTop = log.scrollHeight;
+      return node;
+    }
+
+    function showSuggestion(item) {
+      suggestion = item;
+      suggest.hidden = false;
+      suggest.style.display = "block";
+      suggest.textContent = "固定回答：" + item.question;
+    }
+
+    function hideSuggestion() {
+      suggestion = null;
+      suggest.style.display = "none";
+    }
+
+    async function loadMenu() {
+      const box = document.querySelector("#menu");
+      try {
+        const res = await fetch("/menu/list");
+        const dishes = await res.json();
+        box.replaceChildren();
+        dishes.forEach((dish) => {
+          const row = document.createElement("div");
+          row.className = "dish";
+          const name = document.createElement("b");
+          name.textContent = dish.dish_name;
+          const price = document.createElement("span");
+          price.className = "price";
+          price.textContent = "¥" + dish.price;
+          row.append(name, price);
+          box.appendChild(row);
+        });
+      } catch (error) {
+        box.textContent = "菜单暂时读不出来。请确认接口已在 8080 端口启动。";
+      }
+    }
+
+    text.addEventListener("input", () => {
+      clearTimeout(suggestTimer);
+      const value = text.value.trim();
+      if (!value) {
+        hideSuggestion();
+        return;
+      }
+      suggestTimer = setTimeout(async () => {
+        const res = await fetch("/faq/suggest?user_text=" + encodeURIComponent(value));
+        const data = await res.json();
+        if (!Array.isArray(data) || data.length < 2 || text.value.trim() !== value) {
+          hideSuggestion();
+          return;
+        }
+        showSuggestion({ answer: data[0], question: data[1] });
+      }, 300);
+    });
+
+    suggest.addEventListener("click", () => {
+      if (!suggestion) return;
+      addBubble("user", suggestion.question);
+      addBubble("bot", suggestion.answer);
+      text.value = "";
+      hideSuggestion();
+    });
+
+    document.querySelector("#composer").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const value = text.value.trim();
+      if (!value || send.disabled) return;
+      hideSuggestion();
+      text.value = "";
+      addBubble("user", value);
+      const bot = addBubble("bot", "");
+      send.disabled = true;
+      try {
+        const res = await fetch(
+          "/chat/stream?user_text=" + encodeURIComponent(value) + "&thread_id=" + encodeURIComponent(threadId),
+          { method: "POST" }
+        );
+        if (!res.ok) throw new Error("stream failed");
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value: chunk } = await reader.read();
+          if (done) break;
+          bot.textContent += decoder.decode(chunk, { stream: true });
+          log.scrollTop = log.scrollHeight;
+        }
+        if (!bot.textContent) bot.textContent = "没有收到回复。";
+      } catch (error) {
+        bot.textContent = "发送失败。请确认接口已启动。";
+      } finally {
+        send.disabled = false;
+        text.focus();
+      }
+    });
+
+    addBubble("bot", "可以问营业时间、地址、电话，也可以说想吃什么，或直接订位。");
+    loadMenu();
+  </script>
+</body>
+</html>
